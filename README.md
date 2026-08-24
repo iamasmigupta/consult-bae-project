@@ -17,7 +17,7 @@ Merge three messy CSVs into one clean SQLite DB, wire up an n8n duplicate-alert 
 | 5 | **Stretch: launch to 5 000 workers** | §7 below. |
 | — | **Setup steps** | §2 below. |
 | — | **Stuck log — hardest 2-3 places + searches + rejected AI suggestions** | §8 below. Four real entries. |
-| — | **Deploy anywhere free** | `render.yaml` blueprint at repo root. Local run works out of the box for the demo video. |
+| — | **Deploy anywhere free** | `render.yaml` blueprint at repo root. Haven't hosted yet.
 
 ---
 
