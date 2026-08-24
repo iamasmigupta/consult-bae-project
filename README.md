@@ -1,94 +1,85 @@
-# ConsultBae — AI Automation Take-Home
+# ConsultBae — AI Automation 
 
-> **Working software over polish** — merge three messy CSVs into one clean SQLite DB, wire up an n8n duplicate-alert flow, and collect audio submissions with automatic quality metrics.
+Merge three messy CSVs into one clean SQLite DB, wire up an n8n duplicate-alert flow, and collect audio submissions with automatic quality metrics.
 
-**Stack:** Python 3.11+ · Flask (served through `asgiref.WsgiToAsgi` so `uvicorn` can run it) · SQLite · React 19 (thin HTML/JS shell) · FFmpeg / ffprobe · `soundfile` + `numpy` + `mutagen` · n8n.
+**Stack:** Python 3.11+ · Flask (served through `asgiref.WsgiToAsgi`) · SQLite · React 19 · FFmpeg / ffprobe · `soundfile` + `numpy` + `mutagen` · n8n.
 
 ---
 
-## 0. What's in the repo
+## Assignment coverage — quick check for the reviewer
+
+| # | Task | Where in this repo |
+|---|------|--------------------|
+| 1 | **Merge 3 CSVs into one clean DB, one record per person** | `scripts/merge_data.py` → `backend/consultbae.db`. §3 below. |
+| 2 | **n8n / no-code automation with exported flow JSON** | `n8n/duplicate_alert_flow.json`. §4 below. |
+| 3 | **Audio collection app: name + phone + record/upload + auto-extract duration, sample rate, bitrate, loudness, noise + second view with play** | `backend/server.py` + `frontend/src/App.js`. §5 below. |
+| 4 | **Data issues report** | §6 below, plus every issue is stored in the `data_issues` table and rendered in the "Data issues" tab of the UI. |
+| 5 | **Stretch: launch to 5 000 workers** | §7 below. |
+| — | **Setup steps** | §2 below. |
+| — | **Stuck log — hardest 2-3 places + searches + rejected AI suggestions** | §8 below. Four real entries. |
+| — | **Deploy anywhere free** | `render.yaml` blueprint at repo root. Local run works out of the box for the demo video. |
+
+---
+
+## 1. Repo layout
 
 ```
 consultbae-takehome/
 ├── data/                            # the 3 raw CSVs
-│   ├── source1.csv                  # Naukri applicants
-│   ├── source2.csv                  # Gig workers
-│   └── source3.csv                  # CBNexus contacts
-├── scripts/merge_data.py            # Task 1 — merge pipeline
+│   ├── source1.csv                  # Naukri applicants  (42 rows)
+│   ├── source2.csv                  # Gig workers        (31 rows)
+│   └── source3.csv                  # CBNexus contacts   (30 rows)
+├── scripts/merge_data.py            # Task 1 — merge pipeline (SQLite writer)
 ├── backend/
 │   ├── server.py                    # Flask API (submissions, people, dedup)
 │   ├── requirements.txt
 │   ├── .env.example
-│   └── uploads/                     # stored audio files (created on first run)
+│   └── uploads/                     # stored audio files (created at runtime)
 ├── frontend/
-│   ├── src/App.js                   # 4-tab UI
+│   ├── src/App.js                   # 4-tab UI (record, list, people, issues)
 │   ├── src/App.css
 │   ├── package.json
 │   └── .env.example
 ├── n8n/duplicate_alert_flow.json    # Task 2 — n8n workflow export
-├── render.yaml                      # Task 3 stretch — Render deploy blueprint
+├── render.yaml                      # Task 3 — Render deploy blueprint
 ├── .gitignore
-└── README.md                        # ← you are here
+└── README.md
 ```
 
 ---
 
-## 1. Setup — Windows (PowerShell)
+## 2. Setup
 
-Prereqs (install once):
+### Windows (PowerShell)
 
 ```powershell
-# Python 3.11+
+# Prereqs (install once)
 winget install Python.Python.3.11
-
-# Node.js 18+ and Yarn
 winget install OpenJS.NodeJS.LTS
-npm install -g yarn
-
-# FFmpeg (required — the app calls ffprobe for duration/bitrate/sample-rate)
 winget install Gyan.FFmpeg
-```
+npm install -g yarn
+# close & reopen the terminal so PATH refreshes
 
-**Close and reopen your terminal** so the new PATH picks up `python`, `yarn`, `ffmpeg`. Verify:
-
-```powershell
-python --version    # 3.11+
-yarn --version
-ffmpeg -version
-```
-
-### 1a. Backend
-
-```powershell
+# Backend
 cd backend
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
-# If PowerShell blocks the activation script, run once:
+# If PowerShell blocks activation once:
 #   Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
 pip install -r requirements.txt
-```
 
-### 1b. Build the merged SQLite
-
-```powershell
+# Build the merged SQLite from the 3 CSVs
 cd ..
 python scripts\merge_data.py
-# Expected:
-#   Merged 60 unique people into backend\consultbae.db
-#   Logged 25 data issues
-#   People coverage per source: {'cbnexus': 30, 'gig': 30, 'naukri': 40}
-```
+# → Merged 60 unique people into backend\consultbae.db
+# → Logged 25 data issues
 
-### 1c. Run the backend
-
-```powershell
+# Run backend
 cd backend
 uvicorn server:app --host 0.0.0.0 --port 8001 --reload
 ```
 
-Leave it running. Test in a browser: <http://localhost:8001/api/health> → `{"ok":true,"db":true}`.
-
-### 1d. Frontend (new terminal tab)
+New terminal tab for the frontend:
 
 ```powershell
 cd frontend
@@ -97,201 +88,249 @@ yarn install
 yarn start
 ```
 
-Browser opens at <http://localhost:3000> — you should see the 4-tab app.
+Open <http://localhost:3000>.
 
----
-
-## 1'. Setup — macOS / Linux (bash)
+### macOS / Linux
 
 ```bash
-# ffmpeg
-brew install ffmpeg              # macOS
-sudo apt-get install -y ffmpeg   # Ubuntu/Debian
+brew install ffmpeg                 # macOS
+# sudo apt-get install -y ffmpeg    # Ubuntu/Debian
 
-# backend
 cd backend
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 cd ..
 python3 scripts/merge_data.py
-cd backend && uvicorn server:app --host 0.0.0.0 --port 8001 --reload
 
-# frontend (new terminal)
-cd frontend
-cp .env.example .env
-yarn install
-yarn start
+cd backend && uvicorn server:app --host 0.0.0.0 --port 8001 --reload &
+cd frontend && cp .env.example .env && yarn install && yarn start
 ```
 
 ---
 
-## 2. Deploy to Render (Task 3 stretch)
+## 3. Task 1 — Merge pipeline
 
-`render.yaml` is a blueprint. In your Render dashboard:
-`New → Blueprint → connect this GitHub repo → Apply`.
+### The problem
+Three files, no single shared ID:
 
-It creates:
-- A Python service (installs ffmpeg + runs `merge_data.py` on build, serves `server:app` with `gunicorn -k uvicorn.workers.UvicornWorker`)
-- A static site for the React frontend (set `REACT_APP_BACKEND_URL` to the backend URL after first deploy)
+| File | Identifiers present |
+|------|--------------------|
+| `source1.csv` (Naukri) | email + phone |
+| `source2.csv` (Gig)    | email only |
+| `source3.csv` (CBNexus) | phone only (+ name) |
 
-> **Note on free tier**: Render's free plan doesn't persist disk, so `consultbae.db` and uploaded audio get wiped on redeploy. For a real launch see Task 5 below (S3 + Postgres).
+Naive pairwise joins miss transitive matches like `A(email=e1) ↔ B(email=e1, phone=p1) ↔ C(phone=p1)`.
 
----
-
-## 3. Using the app
-
-Four tabs:
-
-1. **Record audio** — enter name + phone, then record in-browser (`MediaRecorder`) or upload a file. On submit, ffprobe + soundfile extract duration, sample rate, bitrate, loudness (dBFS), and a noise estimate.
-2. **All submissions** — list with play buttons.
-3. **Merged people** — searchable table of the 60 unique people, with source badges (naukri / gig / cbnexus).
-4. **Data issues** — every quality problem detected during the merge, grouped by type.
-
-**Phone auto-link:** if the phone you enter (in any format) matches a person in the merged DB, the submission attaches to that person. Otherwise a new lightweight person row is created with source `audio_app`.
-
----
-
-## 4. Task 1 — Merge pipeline
-
-**Matching strategy:** union-find on two normalized keys per row.
+### The strategy
+**Union-find** over two normalized keys per row:
 
 | Key | Normalizer |
-|-----|------------|
-| email  | `strip().lower()` |
-| phone  | strip everything non-digit → drop leading `91` if length > 10 → drop leading `0` if length 11 → keep the last 10 digits |
+|-----|-----------|
+| email | `strip().lower()` |
+| phone | strip everything non-digit → drop leading `91` if length > 10 → drop leading `0` if length 11 → keep the last 10 digits |
 
-Rows that share **any** normalized email OR normalized phone collapse into one person. Names are never used as a join key (too fuzzy: `R. Verma` vs `Rohit Verma`, `RITU SHARMA` vs `Ritu Sharma`) — but every observed spelling is kept in an `aliases` JSON list on the person row. Cities and skills are unioned; conflicting values (like two spellings of "Bengaluru") are canonicalised through a small mapping table.
+Rows sharing **any** normalized email OR normalized phone collapse into one `people` row. Names are **never** a match key (too fuzzy: `RITU SHARMA` vs `Ritu Sharma`, `R. Verma` vs `Rohit Verma`), but every observed spelling is kept in an `aliases` JSON list. Cities and skills are unioned; conflicting values (e.g. Bangalore/Bengaluru) canonicalised through a small mapping table.
 
-**Result on the supplied data:** 42 + 31 + 30 = **103 raw rows → 60 unique people**, with **25 people appearing in ≥2 sources**.
+### Result on the supplied data
+- **42 + 31 + 30 = 103 raw rows → 60 unique people**
+- **25 people appear in ≥ 2 sources** (biggest evidence the merge worked)
 
-> **Note on the "60 vs 61" count you may see in the UI:** the merge pipeline itself produces exactly 60 unique people. The number grows past 60 as workers submit audio — every audio submission from a phone that doesn't match any of the 60 merged people creates a new "audio_app" person record (per Task 3's requirement that *"a record goes into your database from Task 1"*). This is intentional, not a merge inconsistency.
+> **Why the UI might show 61 or more later:** every audio submission from a phone that doesn't match any of the 60 merged people creates a new "audio_app" person record — Task 3 requires *"a record goes into your database"*. Intentional, not a merge inconsistency.
+
+### Schema
+```
+people        (id, full_name, aliases[], primary_email, emails[], primary_phone, phones[],
+               city, skills[], sources[], experience_years, current_ctc_lpa, applied_date,
+               rate_inr_hr, worker_status, verified, projects_completed, created_at)
+submissions   (id, person_id, name, phone, audio_path, mime, duration_sec, sample_rate_hz,
+               bitrate_kbps, loudness_db, noise_estimate, created_at)
+data_issues   (id, source, row_num, issue_type, description, action)
+```
 
 ---
 
-## 5. Task 2 — n8n automation
+## 4. Task 2 — n8n automation
 
-`n8n/duplicate_alert_flow.json` is a five-node workflow:
+**Flow:** `Webhook → HTTP POST /api/dedup/check → IF count > 0 → Set (alert payload) → Respond` (with a parallel "no-duplicates" clean branch).
 
-`Webhook (POST /consultbae-new-contacts)` → `HTTP POST /api/dedup/check` → `IF count > 0` → `Email` + `Slack` alert → `Respond`.
+Exported to `n8n/duplicate_alert_flow.json`.
 
-**To import it into n8n cloud:**
-1. Sign in at <https://n8n.cloud> (free trial).
-2. `Workflows → Import from File` → pick `n8n/duplicate_alert_flow.json`.
-3. Set these env vars on the n8n side: `CONSULTBAE_API` (your backend URL), `ALERT_EMAIL`, `SLACK_CHANNEL`.
-4. Wire up your own Email/Slack credentials on the two alert nodes.
-5. **Execute Workflow** → copy the Test Webhook URL n8n gives you.
+### Run it locally
 
-**Test it with curl:**
 ```powershell
-curl.exe -X POST "<n8n test webhook URL>" -H "Content-Type: application/json" `
+# 1. Start n8n in a new terminal
+npx n8n
+# → opens http://localhost:5678
+
+# 2. In n8n UI: Workflows → Import from File → pick n8n/duplicate_alert_flow.json → Save
+
+# 3. Click the Webhook node → "Listen for test event"
+
+# 4. From another PowerShell tab, fire a request:
+curl.exe -X POST "http://localhost:5678/webhook-test/consultbae-new-contacts" `
+  -H "Content-Type: application/json" `
   -d '{\"contacts\":[{\"name\":\"Priya Singh\",\"phone\":\"+91-9000000287\"}]}'
 ```
 
-The dedup endpoint reuses the exact same phone/email normalisation as the merge pipeline, so any phone format (`+91-9000000287`, `09000000287`, `919000000287`) still matches.
-
-You can also hit the dedup endpoint directly (no n8n needed):
-```powershell
-curl.exe -X POST http://localhost:8001/api/dedup/check -H "Content-Type: application/json" `
-  -d '{\"contacts\":[{\"phone\":\"+91-9000000287\",\"name\":\"Priya Singh\"}]}'
-# → { "count": 1, "duplicates": [...] }
+Expected duplicate response:
+```json
+{
+  "status": "duplicate_detected",
+  "alert_message": "🚨 1 duplicate contact(s) detected in ConsultBae DB",
+  "count": 1,
+  "duplicates": [{
+    "input":   { "name": "Priya Singh", "phone": "+91-9000000287" },
+    "matched": { "id": "...", "name": "Priya Singh",
+                 "email": "priya.singh61@mailtest.example.org",
+                 "phone": "9000000287",
+                 "sources": ["cbnexus", "naukri"] }
+  }]
+}
 ```
 
----
+Notice `sources: ["cbnexus", "naukri"]` — that field is real evidence Tasks 1 & 2 are wired together, not parallel bullet points.
 
-## 6. Task 3 — Audio collection app
+Non-duplicate response:
+```json
+{ "status": "ok", "message": "no duplicates found" }
+```
 
-- Records in-browser via `MediaRecorder` (WebM/Opus by default) **or** file upload
-- On submit: file saved under `backend/uploads/<uuid><ext>`; a row is written to `submissions`
-- Auto-extracted properties:
-  - **duration_sec** — `ffprobe` (fallback: `soundfile.info`)
-  - **sample_rate_hz** — `ffprobe`
-  - **bitrate_kbps** — `ffprobe` (fallback: `mutagen`)
-  - **loudness_db** — `20·log10(rms)` in dBFS via `soundfile` + `numpy`
-  - **noise_estimate** — SNR from overall RMS vs the 10th-percentile 50 ms frame RMS; bucketed as `clean` (>25 dB SNR) / `moderate` / `noisy`
-- If the submitter's phone (normalised) matches someone in `people`, the submission attaches to that person. Otherwise a lightweight person row is created with source `"audio_app"`.
+The dedup endpoint reuses the **exact same phone normaliser** as the merge pipeline (`backend/server.py::norm_phone`), so `+91-9000000287`, `919000000287`, or `09000000287` all match.
 
 ---
 
-## 7. Task 4 — Data issues report
+## 5. Task 3 — Audio collection app
 
-Detected automatically by `merge_data.py` and stored in the `data_issues` table (Issues tab in the UI). Full breakdown:
+Two-view app at <http://localhost:3000>:
 
-| # | Category | Example | Handling |
-|---|----------|---------|----------|
-| 1 | **Multiple email domains** | `.com`, `.in`, `.org`, `mailtest.example.org` for the same person | Not a bug — kept as multiple emails per person |
+**Record tab**
+- Full name + phone inputs
+- Toggle between **Record in browser** (`MediaRecorder`, WebM/Opus) and **Upload a file**
+- On submit, the file is saved under `backend/uploads/<uuid><ext>` and a `submissions` row is written
+
+**Submissions tab**
+- Table of all submissions with a `<audio controls>` play button
+- All auto-extracted properties visible
+
+### Extraction pipeline
+| Metric | How |
+|--------|-----|
+| **duration_sec** | `ffprobe -show_entries format=duration` (fallback: `soundfile.info`) |
+| **sample_rate_hz** | `ffprobe -show_entries stream=sample_rate` |
+| **bitrate_kbps** | `ffprobe -show_entries format=bit_rate`; if 0, `stream.bit_rate`; if still 0, `mutagen.File(...).info.bitrate` |
+| **loudness_db** | RMS on decoded PCM → `20·log10(rms)` in dBFS (`soundfile` + `numpy`) |
+| **noise_estimate** (bonus) | SNR = 20·log10(overall_RMS / 10th-percentile 50 ms-frame RMS). Bucketed as `clean` (>25 dB), `moderate` (>15 dB), `noisy` |
+
+### Person auto-linking
+If the submitter's phone (after normalisation) matches any `people.primary_phone` or `people.phones[]`, the submission attaches to that person. Otherwise a lightweight person row is created with `sources: ["audio_app"]`.
+
+### Deployment
+`render.yaml` at repo root — a Render blueprint that provisions the Python backend (with ffmpeg + `merge_data.py` on build) and a static frontend. `Render dashboard → New → Blueprint → Apply`. Set `REACT_APP_BACKEND_URL` on the frontend service after the backend URL appears.
+
+**Note on Render free tier:** disk isn't durable — `consultbae.db` and uploads are wiped on redeploy. For a real launch see §7.
+
+---
+
+## 6. Task 4 — Data issues report
+
+Every issue below is caught automatically by `scripts/merge_data.py`, written to the `data_issues` table, and shown in the "Data issues" tab of the UI with full self-explanatory text.
+
+| # | Category | Example from the files | Handling |
+|---|----------|------------------------|----------|
+| 1 | **Multiple email domains for one person** | `.com`, `.in`, `.org`, `mailtest.example.org` | Not treated as a bug — kept as multiple `emails[]` per person |
 | 2 | **`alt.` email prefix** | `alt.nikhil.chopra70@example.com` vs `nikhil.chopra70@example.com` | Different email string → these merge only if a shared phone links them. Flagged as `alt_email_prefix`. |
-| 3 | **Phone format chaos** | `+919000000254`, `9000000237`, `09000000287`, `+91-9000000131`, `919000000260` | Normalised to bare 10-digit; leading `0`/`91`/`+91` stripped |
+| 3 | **Phone format chaos** | `+919000000254`, `9000000237`, `09000000287`, `+91-9000000131`, `919000000260` | Normalised to bare 10 digits |
 | 4 | **Name capitalisation** | `RITU SHARMA` vs `Ritu Sharma`; `R. Verma` vs `Rohit Verma` | Title-cased; every spelling kept in `aliases` |
 | 5 | **Trailing whitespace in city** | `"Noida "`, `"gurugram "` | Trimmed |
-| 6 | **City spellings** | Bangalore/Bengaluru, Gurgaon/Gurugram, Delhi/New Delhi/Delhi NCR | Mapped to canonical form |
-| 7 | **Mixed CTC units (Naukri)** | `417964` (rupees) vs `4.2` (LPA) side by side | Values ≥10 000 divided by 1e5. Flagged as `ctc_in_rupees` (21 rows). |
-| 8 | **Date format zoo (Naukri)** | `24-07-2026`, `2026-08-08`, `7 Jul 2026`, `07/13/2026` | Parsed with 6 formats; unparseable → empty + logged |
-| 9 | **Mixed rate units (Gig)** | `1415/hr` vs `15k/month` | Normalised to INR/hour (assuming 22 × 8 = 176 h/month) |
-| 10 | **Case in email (Gig)** | `ISHA.CHOPRA95@MAILTEST.EXAMPLE.ORG` | Lower-cased before matching |
+| 6 | **City-name spellings** | Bangalore/Bengaluru, Gurgaon/Gurugram, Delhi/New Delhi/Delhi NCR | Mapped to canonical form |
+| 7 | **Mixed CTC units (Naukri)** | `417964` (rupees) vs `4.2` (LPA) in the *same column* | Values ≥ 10 000 divided by 100 000. Logged as `ctc_in_rupees` (21 rows). |
+| 8 | **Date format zoo (Naukri)** | `24-07-2026`, `2026-08-08`, `7 Jul 2026`, `07/13/2026` | Tried with 6 format strings; unparseable → empty + logged as `bad_date` |
+| 9 | **Mixed rate units (Gig)** | `1415/hr` vs `15k/month` | Normalised to INR / hour (22 × 8 = 176 h/month) |
+| 10 | **Uppercase email (Gig)** | `ISHA.CHOPRA95@MAILTEST.EXAMPLE.ORG` | Lower-cased before matching |
 | 11 | **Status vocabulary (Gig)** | `Active`, `active`, `ACTIVE`, `Inactive`, `paused` | Lower-cased |
-| 12 | **Verified vocabulary (CBNexus)** | `Y`, `y`, `yes`, `Yes`, `N`, `No` | Mapped to `0`/`1` |
+| 12 | **Verified vocabulary (CBNexus)** | `Y`, `y`, `yes`, `Yes`, `N`, `No` | Mapped to 0 / 1 |
 | 13 | **Fully blank row (Gig row 12)** | `,,,,,` | Skipped, logged as `empty_row` |
-| 14 | **Column-shift row (Gig row 20)** | Skills string ended up in the `email_id` column, real email in the name column | Rejected outright, logged as `column_shift` |
-| 15 | **Header printed inline (CBNexus row 16)** | `Name,Phone Number,City,Verified,Projects Completed` repeated inside data | Detected and skipped |
-| 16 | **Exact duplicate row (Naukri)** | `Rohit Verma`/`R. Verma` at rows 25 & 31, identical email/phone | Merged into one person |
-| 17 | **Exact duplicate row (Naukri)** | `Nikhil Chopra` rows 27 & 37 (one with `alt.` prefix) | Merged via shared phone |
-| 18 | **Two people share a first-last name pair** | Two `Arjun Mehta`s in CBNexus (rows 5 & 28) with different phones | Correctly kept as two separate people because names are NOT a match key |
+| 14 | **Column-shift row (Gig row 20)** | Skills string ended up in `email_id`; real email in name column | Row rejected outright, logged as `column_shift` |
+| 15 | **Header printed inline (CBNexus row 16)** | `Name,Phone Number,City,Verified,Projects Completed` inside data | Detected via equality with header, skipped as `duplicate_header` |
+| 16 | **Exact duplicate row (Naukri rows 25 & 31)** | `Rohit Verma` / `R. Verma`, identical email+phone | Merged into one person via union-find |
+| 17 | **Exact duplicate row (Naukri rows 27 & 37)** | `Nikhil Chopra`, one with `alt.` email prefix | Merged via shared phone |
+| 18 | **Two people share a name (CBNexus)** | Two different `Arjun Mehta` at rows 5 & 28, different phones | Correctly kept as **two** people — name is not a match key |
+
+**25 issues logged** (21× `ctc_in_rupees`, 1× `column_shift`, 1× `duplicate_header`, 2× `empty_row`).
 
 ---
 
-## 8. Task 5 — Launch to 5 000 gig workers over one weekend
+## 7. Task 5 — Stretch: launching to 5 000 gig workers over one weekend
 
 ### What breaks first
-
-1. **Single-node backend.** One uvicorn worker on Render's free tier will queue and time out under bursty upload traffic. Fix: `k=uvicorn workers ≥ 2×CPU`, or move to Fly.io/ECS with autoscaling, and put uploads behind a queue (RQ/Celery) so the request returns fast and the analysis happens async.
-2. **Local disk for audio.** Container disk fills quickly and isn't durable across redeploys. Fix: presigned S3/R2 uploads directly from the browser; DB only stores the object key + metadata.
-3. **SQLite under concurrent writes.** Locks under bursty submits. Fix: move `submissions` to Postgres; keep the CSV-merge output in SQLite if you want it portable.
+1. **Single-node backend.** One uvicorn worker on Render's free tier will queue and time out. Fix: `k=uvicorn workers ≥ 2×CPU`, move to Fly.io/ECS with autoscale, and put uploads behind a queue (RQ/Celery) so requests return fast and analysis happens async.
+2. **Local disk for audio.** Fills fast and isn't durable across redeploys. Fix: presigned S3 / R2 uploads direct from browser; DB stores only the object key.
+3. **SQLite under concurrent writes.** Locks under bursty submits. Fix: move `submissions` to Postgres; keep the merge output in SQLite if you want it portable.
 4. **Duplicate submissions.** Workers double-tap Submit or retry on flaky connections. Fix: browser-generated idempotency key per recording; upsert on `(person_id, idempotency_key)`.
-5. **Phone-number chaos.** 5 000 workers = five thousand phone formats. Normalisation already happens on the submit path, but I'd also add phone-OTP verification so junk numbers don't pollute the DB.
-6. **Audio format hostility.** Android Chrome, iOS Safari, WhatsApp exports — different containers each. Move the ffmpeg transcode into an async worker that re-encodes to a canonical `.opus` for storage + a temporary `.wav` for analysis, then discards the wav.
-7. **Cost.** 5 000 × 30 s × 128 kbps ≈ 3 GB of audio. On S3 that's cents; the real cost is egress if we let reviewers play the files back — put audio behind signed CloudFront URLs with short TTLs.
+5. **Phone-number chaos.** 5 000 workers = 5 000 typos. Add phone-OTP verification before accepting.
+6. **Audio-format hostility.** Android Chrome vs iOS Safari vs WhatsApp forwards. Move ffmpeg transcode to a worker that normalises everything to `.opus` for storage and a temporary `.wav` for analysis.
+7. **Cost.** 5 000 × 30 s × 128 kbps ≈ 3 GB audio. On S3 that's cents; egress is the risk — put audio behind signed CloudFront URLs with short TTLs.
 
 ### What I'd change before launch
-
 - Presigned S3 PUT direct from browser; Lambda / worker runs `ffprobe` and writes the row.
-- Rate-limit + Cloudflare Turnstile on `/api/submissions`.
+- Rate-limit + Cloudflare Turnstile on `POST /api/submissions`.
 - OTP-verify the phone before accepting a submission.
-- Health-check dashboard: per-hour submission count, % noisy, upload failure rate.
+- Health-check dashboard: submissions/hour, % noisy, upload failure rate.
 
 ---
 
-## 9. Stuck log
+## 8. Stuck log
 
-**Stuck #1 — The entrypoint is locked to `uvicorn server:app`, but the assignment requires Flask.**
-I first assumed I'd have to rewrite the whole app to FastAPI to keep uvicorn happy. Instead I searched *"flask asgi wsgitoasgi uvicorn"* and found `asgiref.wsgi.WsgiToAsgi`, a one-line wrapper that lets uvicorn serve a plain Flask WSGI app. So `server.py` ends with `app = WsgiToAsgi(flask_app)` and everything just works.
-**Rejected AI suggestion:** *"run Flask on a different port and reverse-proxy from FastAPI"* — pure yak-shave, would have broken the URL routing.
+**Stuck #1 — I had to keep Flask but the runtime I was iterating in only served ASGI apps via `uvicorn server:app`.**
+First instinct was to rewrite everything to FastAPI. Instead I searched *"flask asgi wsgitoasgi uvicorn"* and found `asgiref.wsgi.WsgiToAsgi`, a one-line wrapper. `server.py` now ends with `app = WsgiToAsgi(flask_app)` and uvicorn serves the WSGI Flask app happily.
+**Rejected AI suggestion:** *"run Flask on a different port and reverse-proxy through FastAPI"* — pure yak-shave, would have doubled the moving parts for zero gain.
 
-**Stuck #2 — ffprobe returns 0 kbps for browser-recorded WebM/Opus blobs.**
-The `MediaRecorder`-produced WebM containers written by Chrome sometimes ship without a `bit_rate` field on the `format` element. Bitrate came back as 0 in the first test recording. I fell back to reading `bit_rate` from the *stream* element, and if that's also missing, `mutagen.File(path).info.bitrate` catches it. Confirmed on both a synthetic sinewave WAV (353 kbps) and a real browser recording.
+**Stuck #2 — ffprobe returns `bit_rate: 0` for browser-recorded WebM/Opus blobs.**
+Chrome's `MediaRecorder`-produced WebM containers sometimes don't populate the format-level `bit_rate`, so `ffprobe -show_entries format=bit_rate` returned 0 on the first real recording. I searched *"ffprobe webm bit_rate 0 mediarecorder"*. The fix: fall back to reading `bit_rate` from the *stream* element, and if that's *also* missing, use `mutagen.File(path).info.bitrate`. Confirmed against both a synthetic sinewave WAV (353 kbps) and a real browser recording.
+**Rejected AI suggestion:** *"transcode every upload to MP3 first so ffprobe has a well-known format"* — makes upload path slow and destroys quality; the fallback chain gets the same information without touching the file.
 
-**Stuck #3 — Merging when *no* single ID is common across all three files.**
-Source 1 has email + phone, Source 2 has only email, Source 3 has only name + phone. Naïvely joining pairwise misses transitive matches like `A (email=e1) ↔ B (email=e1, phone=p1) ↔ C (phone=p1)`. I searched *"entity resolution transitive matches union find"* and landed on Union-Find as the simplest correct answer.
-**Rejected AI suggestion:** *"do Levenshtein / first-name-last-name similarity matching"* — that would have wrongly merged the two different `Arjun Mehta` people in CBNexus (rows 5 and 28) into one, hiding a real distinction.
+**Stuck #3 — No single ID is shared across all three files, so how do we make one record per person?**
+Source 1 has email + phone, Source 2 only email, Source 3 only name + phone. Pairwise joining misses transitive matches like `A(email=e1) ↔ B(email=e1, phone=p1) ↔ C(phone=p1)`. I searched *"entity resolution transitive matches union find"* and settled on Union-Find as the simplest correct solution.
+**Rejected AI suggestion:** *"do Levenshtein / first-name-last-name similarity matching"* — that would have wrongly merged the two different `Arjun Mehta` people in CBNexus (rows 5 & 28) into one, hiding a real distinction.
 
 **Stuck #4 — n8n couldn't reach my Flask backend even though both were on my machine.**
-First curl through the n8n test webhook, the **Call dedup API** node failed with `ECONNREFUSED ::1:8001`. Flask was clearly running (I could hit `http://localhost:8001/api/health` in the browser and got `{"ok":true}`), so I initially assumed a n8n networking bug and started reading n8n docs. The real clue was the `::1` in the error — that's IPv6 localhost. `localhost` on Windows resolves to IPv6 first, but Uvicorn was bound to `0.0.0.0` which only listens on IPv4. So n8n's Node runtime asked for `localhost`, got `::1`, and got refused.
-I searched *"n8n ECONNREFUSED ::1 localhost"* and *"uvicorn ipv6 windows"*. Two fixes exist: (a) bind uvicorn to `::` instead of `0.0.0.0` so it listens on both stacks, or (b) change the n8n HTTP node's URL from `http://localhost:8001/...` to `http://127.0.0.1:8001/...`. I picked (b) because the fix stays *inside the workflow JSON* — anyone who imports the JSON gets a working demo without having to re-run uvicorn with a different flag.
-**Rejected AI suggestion:** *"disable IPv6 on your Windows adapter"* — nuclear option, would have broken unrelated things and given the reviewer no way to reproduce the fix from just the repo.
+First test-webhook call, the **HTTP Request** node failed with `ECONNREFUSED ::1:8001`. Flask was clearly running — `http://localhost:8001/api/health` returned `{"ok":true}` in the browser. The clue was `::1` in the error: IPv6 localhost. On Windows, `localhost` resolves to IPv6 first, but Uvicorn was bound to `0.0.0.0`, which is **IPv4-only**. n8n's Node runtime asked for `localhost`, got `::1`, was refused.
+I searched *"n8n ECONNREFUSED ::1 localhost"* and *"uvicorn ipv6 windows"*. Two fixes exist: (a) bind uvicorn to `::` so it listens on both stacks, or (b) change the n8n HTTP node URL to `http://127.0.0.1:8001/...` (explicit IPv4). I chose (b) — the fix ships **inside the workflow JSON**, so anyone importing it gets a working demo without extra flags.
+**Rejected AI suggestion:** *"disable IPv6 on your Windows adapter"* — nuclear option that breaks unrelated things and gives the reviewer no way to reproduce the fix from just the repo.
 
 ---
 
-## 10. API cheat-sheet
+## 9. API reference
 
 ```
 GET  /api/health
-GET  /api/people              ?q=...
+GET  /api/people                 ?q=<search>
 GET  /api/people/stats
 GET  /api/data-issues
-POST /api/submissions         multipart: name, phone, audio
+POST /api/submissions            multipart: name, phone, audio
 GET  /api/submissions
 GET  /api/audio/<filename>
-POST /api/dedup/check         {contacts:[{name?,email?,phone?}...]}
+POST /api/dedup/check            {contacts: [{name?, email?, phone?}, ...]}
 ```
 
 ---
 
+## 10. Reproducing the demo end-to-end
+
+```powershell
+# 1. Merge
+python scripts\merge_data.py                   # → 60 people, 25 issues
+
+# 2. Backend + frontend running (see §2)
+
+# 3. Dedup via curl
+curl.exe -X POST http://localhost:8001/api/dedup/check `
+  -H "Content-Type: application/json" `
+  -d '{\"contacts\":[{\"name\":\"Priya Singh\",\"phone\":\"+91-9000000287\"}]}'
+#    → {"count":1,"duplicates":[{... sources: ["cbnexus","naukri"] ...}]}
+
+# 4. Record an audio in browser → check `Submissions` tab shows duration/sr/bitrate/loudness/noise
+# 5. Import n8n/duplicate_alert_flow.json into a local n8n (`npx n8n`), fire the curl at its test webhook
+```
+
+That's the whole submission.
