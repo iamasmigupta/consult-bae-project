@@ -1,0 +1,28 @@
+services:
+  - type: web
+    name: consultbae-backend
+    runtime: python
+    plan: free
+    rootDir: backend
+    buildCommand: |
+      apt-get update && apt-get install -y ffmpeg && \
+      pip install -r requirements.txt && \
+      python ../scripts/merge_data.py
+    startCommand: gunicorn -k uvicorn.workers.UvicornWorker -w 1 --bind 0.0.0.0:$PORT server:app
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.9
+
+  - type: web
+    name: consultbae-frontend
+    runtime: static
+    rootDir: frontend
+    buildCommand: yarn install && yarn build
+    staticPublishPath: build
+    envVars:
+      - key: REACT_APP_BACKEND_URL
+        sync: false   # set to the backend URL after first deploy
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html

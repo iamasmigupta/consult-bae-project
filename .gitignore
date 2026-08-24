@@ -70,5 +70,3 @@ venv/
 # Build caches
 .cache/
 
-# Deploy config
-render.yaml
